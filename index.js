@@ -1,6 +1,6 @@
-require("dotenv").config();
+require('dotenv').config();
 
-const serverless = require("serverless-http");
-const app = require("./src/app");
+const serverless = require('serverless-http');
+const app = require('./src/app');
 
 module.exports.handler = serverless(app);
