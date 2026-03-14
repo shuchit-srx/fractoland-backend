@@ -10,7 +10,7 @@ app.use(express.json());
 
 // health route
 app.get("/", (req, res) => {
-  res.json({ message: "🚀 Server Message: Backend running" });
+  res.json({ message: "🌐 Server Message: Backend running" });
 });
 
 module.exports = app;
