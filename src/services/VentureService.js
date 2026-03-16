@@ -15,7 +15,7 @@ function generateRef() {
  * List ventures with filters. Public: status=live only. Owner: owner_id=me. Admin: all.
  */
 async function list({ status, state, min_value, owner_id, mature_for_bid, limit = 20, offset = 0 }, userId, userRole) {
-  let q = adminSupabase.from('ventures').select('id, ref, name, owner_id, land_type, status, district, state, country, full_address, area_acres, total_value, expected_roi_percent, lock_in_months, map_center_lat, map_center_lng, created_at, updated_at, venture_tokens(token_price, total_tokens, available_tokens)', { count: 'exact' });
+  let q = adminSupabase.from('ventures').select('id, ref, name, owner_id, land_type, status, district, state, country, full_address, area_acres, total_value, expected_roi_percent, lock_in_months, map_center_lat, map_center_lng, created_at, updated_at, venture_tokens(token_price, total_tokens, available_tokens), venture_images(file_url)', { count: 'exact' });
 
   if (owner_id === 'me' && userId) {
     q = q.eq('owner_id', userId);
@@ -39,12 +39,15 @@ async function list({ status, state, min_value, owner_id, mature_for_bid, limit 
   const items = (data || []).map((v) => {
     const raw = v.venture_tokens;
     const t = Array.isArray(raw) ? raw[0] : raw || {};
-    const { venture_tokens, ...rest } = v;
+    const imgs = v.venture_images || [];
+    const firstImg = Array.isArray(imgs) ? imgs[0] : imgs && typeof imgs === 'object' && 'file_url' in imgs ? imgs : null;
+    const { venture_tokens, venture_images, ...rest } = v;
     return {
       ...rest,
       token_price: t.token_price ?? null,
       total_tokens: t.total_tokens ?? 0,
       available_tokens: t.available_tokens ?? 0,
+      image_url: firstImg?.file_url ?? null,
     };
   });
   return { items, total: count ?? 0 };
