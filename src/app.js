@@ -5,6 +5,9 @@ const cors = require('cors');
 const authRoutes = require('./routes/authRoutes');
 const usersRoutes = require('./routes/usersRoutes');
 const venturesRoutes = require('./routes/venturesRoutes');
+const walletsRoutes = require('./routes/walletsRoutes');
+const investmentsRoutes = require('./routes/investmentsRoutes');
+const pollsRoutes = require('./routes/pollsRoutes');
 
 const app = express();
 
@@ -18,5 +21,8 @@ app.get('/', (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/users', usersRoutes);
 app.use('/ventures', venturesRoutes);
+app.use('/wallets', walletsRoutes);
+app.use('/investments', investmentsRoutes);
+app.use('/polls', pollsRoutes);
 
 module.exports = app;
