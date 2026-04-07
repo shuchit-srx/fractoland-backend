@@ -10,11 +10,12 @@ Migrations follow the schema in **fractoland-ui/docs/FractoLand_Backend_DB_and_B
 4. **003_payments_investments_resale.sql** – `payments`, `investments`, `resale_requests`.
 5. **004_polls_agents_developers.sql** – `polls`, `poll_votes`, `agent_earnings`, `developer_bids`.
 6. **005_wishlist_notifications_bank_audit_govt.sql** – `refresh_tokens.revoked_at`, `developer_profiles`, `wishlist`, `notifications`, `bank_accounts`, `govt_api_tokens`, `audit_logs`.
+7. **006_poll_vote_tally_function.sql** – `refresh_poll_vote_tallies(uuid)` to keep `polls.yes_count` / `no_count` aligned with token-weighted `poll_votes` (optional fallback in app if RPC missing).
 
 ## How to run
 
 - **Supabase:** Run each file in order in the SQL Editor, or use `supabase db push` if using Supabase CLI.
-- **Plain PostgreSQL:** `psql -f 000_core_tables.sql`, then 001 → 002 → 003 → 004 → 005 in order.
+- **Plain PostgreSQL:** `psql -f 000_core_tables.sql`, then 001 → 002 → 003 → 004 → 005 → **006** in order.
 
 ## Notes
 
