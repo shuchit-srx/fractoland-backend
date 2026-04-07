@@ -28,8 +28,11 @@ async function list({ status, state, min_value, owner_id, mature_for_bid, limit 
   if (min_value != null) q = q.gte('total_value', min_value);
   if (mature_for_bid === 'true') q = q.in('status', ['live', 'voting', 'sold']);
 
+  const matureCatalogOk = mature_for_bid === 'true' && (userRole === 'developer' || userRole === 'admin');
   if (userRole !== 'admin' && owner_id !== 'me' && !owner_id) {
-    q = q.eq('status', 'live');
+    if (!matureCatalogOk) {
+      q = q.eq('status', 'live');
+    }
   }
 
   q = q.order('created_at', { ascending: false }).range(offset, offset + limit - 1);

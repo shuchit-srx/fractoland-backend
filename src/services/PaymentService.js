@@ -6,6 +6,7 @@ const WalletService = require('./WalletService');
 const ReferralService = require('./ReferralService');
 const ResaleService = require('./ResaleService');
 const AuditService = require('./AuditService');
+const NotificationService = require('./NotificationService');
 
 function toNum(v) {
   return Number(v ?? 0);
@@ -119,6 +120,14 @@ async function processInvestmentCompletionForPayment(payment, status) {
         amount_paid: Number(inv.amount_paid ?? 0),
       });
     }
+    const { data: vRow } = await adminSupabase.from('ventures').select('name').eq('id', inv.venture_id).maybeSingle();
+    const vname = vRow?.name || 'the venture';
+    await NotificationService.create(inv.user_id, {
+      title: 'Investment confirmed',
+      message: `Your payment completed: ${needed} token(s) in ${vname}.`,
+      type: 'success',
+      metadata: { investment_id: inv.id, venture_id: inv.venture_id, payment_id: payment.id },
+    });
     return;
   }
 

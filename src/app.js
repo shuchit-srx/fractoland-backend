@@ -14,6 +14,9 @@ const referralsRoutes = require('./routes/referralsRoutes');
 const ownersRoutes = require('./routes/ownersRoutes');
 const resaleRoutes = require('./routes/resaleRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const developerBidsRoutes = require('./routes/developerBidsRoutes');
+const notificationsRoutes = require('./routes/notificationsRoutes');
+const govtRoutes = require('./routes/govtRoutes');
 
 const app = express();
 
@@ -36,5 +39,8 @@ app.use('/referrals', referralsRoutes);
 app.use('/owners', ownersRoutes);
 app.use('/resale-requests', resaleRoutes);
 app.use('/admin', adminRoutes);
+app.use('/developer-bids', developerBidsRoutes);
+app.use('/notifications', notificationsRoutes);
+app.use('/govt', govtRoutes);
 
 module.exports = app;

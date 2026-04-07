@@ -27,4 +27,7 @@ router.get('/payments', AdminController.listPayments);
 
 router.get('/audit-logs', AdminController.listAuditLogs);
 
+router.post('/govt-api-tokens', AdminController.createGovtToken);
+router.get('/govt-api-tokens', AdminController.listGovtTokens);
+
 module.exports = router;

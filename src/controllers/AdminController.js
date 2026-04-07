@@ -7,6 +7,9 @@ const DeveloperBidService = require('../services/DeveloperBidService');
 const PaymentService = require('../services/PaymentService');
 const AdminAnalyticsService = require('../services/AdminAnalyticsService');
 const AuditService = require('../services/AuditService');
+const GovtService = require('../services/GovtService');
+const NotificationService = require('../services/NotificationService');
+const { adminSupabase } = require('../config/database');
 const { clientIp } = require('../utils/requestIp');
 
 function parseLimitOffset(query, maxLimit = 100) {
@@ -153,6 +156,19 @@ async function patchDeveloperBid(req, res) {
       payload: { status, notes },
       ip: clientIp(req),
     });
+    if (row.developer_id) {
+      let land = 'your bid';
+      if (row.venture_id) {
+        const { data: v } = await adminSupabase.from('ventures').select('name').eq('id', row.venture_id).maybeSingle();
+        if (v?.name) land = v.name;
+      }
+      await NotificationService.create(row.developer_id, {
+        title: 'Bid status updated',
+        message: `Your bid on ${land} is now: ${status}.`,
+        type: status === 'approved' ? 'success' : status === 'rejected' ? 'alert' : 'info',
+        metadata: { bid_id: row.id, venture_id: row.venture_id, status },
+      });
+    }
     res.json(row);
   } catch (e) {
     console.error('admin patchDeveloperBid error', e);
@@ -185,6 +201,42 @@ async function listAuditLogs(req, res) {
   }
 }
 
+async function createGovtToken(req, res) {
+  try {
+    const { name, permissions } = req.body || {};
+    const row = await GovtService.createToken({ name, permissions });
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'govt_api_token.create',
+      resourceType: 'govt_api_token',
+      resourceId: row.id,
+      payload: { name: row.name, permission_keys: Object.keys(permissions || {}) },
+      ip: clientIp(req),
+    });
+    res.status(201).json({
+      id: row.id,
+      name: row.name,
+      permissions: row.permissions,
+      token: row.token,
+      created_at: row.created_at,
+      message: 'Store this token securely; it cannot be retrieved again.',
+    });
+  } catch (e) {
+    console.error('admin createGovtToken error', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+}
+
+async function listGovtTokens(req, res) {
+  try {
+    const items = await GovtService.listTokens();
+    res.json({ items });
+  } catch (e) {
+    console.error('admin listGovtTokens error', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+}
+
 module.exports = {
   analytics,
   listVentures,
@@ -197,4 +249,6 @@ module.exports = {
   patchDeveloperBid,
   listPayments,
   listAuditLogs,
+  createGovtToken,
+  listGovtTokens,
 };

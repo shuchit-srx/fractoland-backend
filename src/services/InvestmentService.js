@@ -4,6 +4,7 @@ const { adminSupabase } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const WalletService = require('./WalletService');
 const ReferralService = require('./ReferralService');
+const NotificationService = require('./NotificationService');
 
 async function create(userId, { venture_id, token_count, payment_method, referral_code }) {
   const tokenCount = Number(token_count);
@@ -157,6 +158,13 @@ async function create(userId, { venture_id, token_count, payment_method, referra
       amount_paid: amountPaid,
     });
   }
+
+  await NotificationService.create(userId, {
+    title: 'Investment confirmed',
+    message: `You purchased ${tokenCount} token(s) in ${venture.name}.`,
+    type: 'success',
+    metadata: { investment_id: completedInv.id, venture_id, payment_id: payment.id },
+  });
 
   return {
     ...completedInv,

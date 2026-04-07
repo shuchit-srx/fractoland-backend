@@ -3,6 +3,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { adminSupabase } = require('../config/database');
 const WalletService = require('./WalletService');
+const NotificationService = require('./NotificationService');
 
 const ACTIVE_STATUSES = ['pending', 'listed', 'matched'];
 
@@ -102,6 +103,13 @@ async function create(userId, { venture_id, token_count, requested_amount }) {
     .select('id, venture_id, token_count, requested_amount, status, queue_position, created_at, updated_at')
     .single();
   if (error) throw error;
+  const { data: v } = await adminSupabase.from('ventures').select('name').eq('id', venture_id).maybeSingle();
+  await NotificationService.create(userId, {
+    title: 'Resale request submitted',
+    message: `Your request to resell ${tc} token(s) for ${v?.name || 'your land'} is pending admin review.`,
+    type: 'info',
+    metadata: { resale_request_id: data.id, venture_id },
+  });
   return data;
 }
 
@@ -403,6 +411,21 @@ async function settleResaleTransfer({
   }
 
   await WalletService.credit(sellerId, sellerNet);
+
+  const { data: vn } = await adminSupabase.from('ventures').select('name').eq('id', ventureId).maybeSingle();
+  const landName = vn?.name || 'Land parcel';
+  await NotificationService.create(buyerId, {
+    title: 'Resale complete',
+    message: `You received ${tokenCount} token(s) for ${landName}.`,
+    type: 'success',
+    metadata: { resale_request_id: resaleId, venture_id: ventureId },
+  });
+  await NotificationService.create(sellerId, {
+    title: 'Resale proceeds credited',
+    message: `Net ₹${sellerNet.toLocaleString('en-IN')} from your sale on ${landName} was added to your wallet.`,
+    type: 'success',
+    metadata: { resale_request_id: resaleId, venture_id: ventureId },
+  });
 }
 
 async function listMarketplace({ venture_id, limit = 20, offset = 0 } = {}) {

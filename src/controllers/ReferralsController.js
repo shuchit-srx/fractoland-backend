@@ -2,6 +2,7 @@
 
 const ReferralService = require('../services/ReferralService');
 const AuditService = require('../services/AuditService');
+const NotificationService = require('../services/NotificationService');
 const { clientIp } = require('../utils/requestIp');
 
 function parseLimitOffset(query) {
@@ -97,6 +98,12 @@ async function withdraw(req, res) {
       resourceId: row.id,
       payload: { amount: Number(amount), status: row.status },
       ip: clientIp(req),
+    });
+    await NotificationService.create(req.userId, {
+      title: 'Referral withdrawal requested',
+      message: `A withdrawal of ₹${Number(amount).toLocaleString('en-IN')} from your referral earnings was submitted.`,
+      type: 'info',
+      metadata: { agent_earning_id: row.id },
     });
     res.status(201).json(row);
   } catch (e) {

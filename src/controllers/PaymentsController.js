@@ -2,6 +2,7 @@
 
 const PaymentService = require('../services/PaymentService');
 const AuditService = require('../services/AuditService');
+const NotificationService = require('../services/NotificationService');
 const { clientIp } = require('../utils/requestIp');
 
 async function listMe(req, res) {
@@ -54,6 +55,12 @@ async function withdraw(req, res) {
       resourceId: result.id,
       payload: { amount: result.amount, status: result.status },
       ip: clientIp(req),
+    });
+    await NotificationService.create(req.userId, {
+      title: 'Withdrawal processed',
+      message: `₹${Number(result.amount).toLocaleString('en-IN')} was debited from your wallet for withdrawal.`,
+      type: 'info',
+      metadata: { payment_id: result.id },
     });
     res.status(201).json(result);
   } catch (e) {

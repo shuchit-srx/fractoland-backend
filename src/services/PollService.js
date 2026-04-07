@@ -1,6 +1,7 @@
 'use strict';
 
 const { adminSupabase } = require('../config/database');
+const NotificationService = require('./NotificationService');
 
 /** Sum completed investment tokens per venture for a user. */
 async function getTokenWeightByVenture(userId) {
@@ -252,6 +253,17 @@ async function createForOwner(ownerId, body) {
     await adminSupabase.from('ventures').update({ status: 'voting' }).eq('id', venture_id);
   }
 
+  const { data: holderRows } = await adminSupabase.from('investments').select('user_id').eq('venture_id', venture_id).eq('status', 'completed');
+  const holderIds = [...new Set((holderRows || []).map((r) => r.user_id).filter(Boolean))];
+  for (const uid of holderIds) {
+    await NotificationService.create(uid, {
+      title: 'New poll',
+      message: `${question.slice(0, 200)}${question.length > 200 ? '…' : ''}`,
+      type: 'action',
+      metadata: { poll_id: poll.id, venture_id },
+    });
+  }
+
   return poll;
 }
 
@@ -346,6 +358,13 @@ async function castVote(userId, pollId, voteRaw) {
     }
     await adminSupabase.from('polls').update({ yes_count: yesSum, no_count: noSum }).eq('id', pollId);
   }
+
+  await NotificationService.create(userId, {
+    title: 'Vote recorded',
+    message: `Your ${vote} vote (${tokenWeight} token weight) was recorded.`,
+    type: 'info',
+    metadata: { poll_id: pollId, vote },
+  });
 
   return { success: true, token_weight: tokenWeight, vote };
 }

@@ -30,11 +30,16 @@ async function list(req, res) {
   }
 }
 
+function canViewVentureAsDeveloper(venture, userRole) {
+  return userRole === 'developer' && ['live', 'voting', 'sold'].includes(venture.status);
+}
+
 async function getById(req, res) {
   try {
     const venture = await VentureService.findById(req.params.id);
     if (!venture) return res.status(404).json({ error: 'Not found', message: 'Venture not found' });
-    if (venture.status !== 'live' && req.userRole !== 'admin' && venture.owner_id !== req.userId) {
+    const devView = canViewVentureAsDeveloper(venture, req.userRole);
+    if (venture.status !== 'live' && req.userRole !== 'admin' && venture.owner_id !== req.userId && !devView) {
       return res.status(404).json({ error: 'Not found', message: 'Venture not found' });
     }
     res.json(venture);
@@ -49,7 +54,8 @@ async function getTokens(req, res) {
     const tokens = await VentureService.getTokens(req.params.id);
     const venture = await VentureService.findById(req.params.id);
     if (!venture) return res.status(404).json({ error: 'Not found', message: 'Venture not found' });
-    if (venture.status !== 'live' && req.userRole !== 'admin' && venture.owner_id !== req.userId) {
+    const devView = canViewVentureAsDeveloper(venture, req.userRole);
+    if (venture.status !== 'live' && req.userRole !== 'admin' && venture.owner_id !== req.userId && !devView) {
       return res.status(404).json({ error: 'Not found', message: 'Venture not found' });
     }
     res.json(tokens);
