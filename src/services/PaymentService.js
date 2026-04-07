@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { adminSupabase } = require('../config/database');
 const WalletService = require('./WalletService');
+const ReferralService = require('./ReferralService');
 
 function toNum(v) {
   return Number(v ?? 0);
@@ -75,7 +76,7 @@ async function processInvestmentCompletionForPayment(payment, status) {
   if (payment.type !== 'investment') return;
   const { data: inv, error: invErr } = await adminSupabase
     .from('investments')
-    .select('id, venture_id, token_count, status')
+    .select('id, user_id, venture_id, token_count, status, referral_link_id, amount_paid')
     .eq('payment_id', payment.id)
     .maybeSingle();
   if (invErr || !inv) return;
@@ -103,6 +104,14 @@ async function processInvestmentCompletionForPayment(payment, status) {
       .maybeSingle();
     if (!updated) return;
     await adminSupabase.from('investments').update({ status: 'completed' }).eq('id', inv.id);
+    if (inv.referral_link_id) {
+      await ReferralService.onInvestmentCompleted({
+        id: inv.id,
+        user_id: inv.user_id,
+        referral_link_id: inv.referral_link_id,
+        amount_paid: Number(inv.amount_paid ?? 0),
+      });
+    }
     return;
   }
 

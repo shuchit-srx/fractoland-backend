@@ -3,8 +3,9 @@
 const { adminSupabase } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const WalletService = require('./WalletService');
+const ReferralService = require('./ReferralService');
 
-async function create(userId, { venture_id, token_count, payment_method }) {
+async function create(userId, { venture_id, token_count, payment_method, referral_code }) {
   const tokenCount = Number(token_count);
   const method = String(payment_method || '').toLowerCase();
 
@@ -62,6 +63,8 @@ async function create(userId, { venture_id, token_count, payment_method }) {
     throw err;
   }
 
+  const referral_link_id = await ReferralService.resolveReferralForInvestment(userId, referral_code);
+
   // Payment row is always created first for traceability.
   const paymentStatus = method === 'wallet' ? 'completed' : 'pending';
   const gatewayOrderId = method === 'gateway' ? `order_${Date.now()}_${uuidv4().slice(0, 8)}` : null;
@@ -91,6 +94,7 @@ async function create(userId, { venture_id, token_count, payment_method }) {
         token_count: tokenCount,
         amount_paid: amountPaid,
         payment_id: payment.id,
+        referral_link_id,
         status: 'pending',
       })
       .select('id, venture_id, token_count, amount_paid, status, payment_id, tx_hash')
@@ -138,11 +142,21 @@ async function create(userId, { venture_id, token_count, payment_method }) {
       token_count: tokenCount,
       amount_paid: amountPaid,
       payment_id: payment.id,
+      referral_link_id,
       status: 'completed',
     })
-    .select('id, venture_id, token_count, amount_paid, status, payment_id, tx_hash')
+    .select('id, venture_id, token_count, amount_paid, status, payment_id, tx_hash, referral_link_id, user_id')
     .single();
   if (compInvErr) throw compInvErr;
+
+  if (referral_link_id) {
+    await ReferralService.onInvestmentCompleted({
+      id: completedInv.id,
+      user_id: userId,
+      referral_link_id,
+      amount_paid: amountPaid,
+    });
+  }
 
   return {
     ...completedInv,

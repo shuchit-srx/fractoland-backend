@@ -91,7 +91,18 @@ async function ensureWalletForUser(userId) {
 }
 
 async function updateUser(userId, updates) {
-  const allowed = ['name', 'email', 'country_code', 'kyc_status', 'kyc_type', 'kyc_id_encrypted', 'wallet_address', 'email_verified_at'];
+  const allowed = [
+    'name',
+    'email',
+    'country_code',
+    'kyc_status',
+    'kyc_type',
+    'kyc_id_encrypted',
+    'wallet_address',
+    'email_verified_at',
+    'referred_by_agent_id',
+    'referred_by_link_id',
+  ];
   const payload = {};
   for (const key of Object.keys(updates)) {
     const snake = key.replace(/([A-Z])/g, '_$1').toLowerCase();

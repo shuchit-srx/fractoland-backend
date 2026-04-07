@@ -137,6 +137,124 @@ async function getByIdForUser(pollId, userId) {
   return mapPollRow(poll, voteRow, weight);
 }
 
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + Number(days));
+  return d;
+}
+
+/**
+ * Polls for ventures owned by ownerId (dashboard).
+ */
+async function listForOwner(ownerId, { status = 'all', limit = 20, offset = 0 } = {}) {
+  const { data: ventures, error: vErr } = await adminSupabase.from('ventures').select('id').eq('owner_id', ownerId);
+  if (vErr) throw vErr;
+  const ventureIds = (ventures || []).map((v) => v.id);
+  if (ventureIds.length === 0) return { items: [], total: 0 };
+
+  let q = adminSupabase
+    .from('polls')
+    .select(
+      'id, venture_id, type, question, description, rule, starts_at, ends_at, status, result, yes_count, no_count, total_eligible_tokens, ventures(id, name)',
+      { count: 'exact' }
+    )
+    .in('venture_id', ventureIds)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (status === 'active') q = q.eq('status', 'active');
+  else if (status === 'closed') q = q.eq('status', 'closed');
+
+  const { data, error, count } = await q;
+  if (error) throw error;
+
+  const items = (data || []).map((p) => ({
+    id: p.id,
+    venture_id: p.venture_id,
+    venture_name: p.ventures?.name || null,
+    type: p.type,
+    question: p.question,
+    description: p.description,
+    rule: p.rule ?? null,
+    starts_at: p.starts_at ?? null,
+    ends_at: p.ends_at ?? null,
+    status: p.status,
+    result: p.result ?? null,
+    yes_count: p.yes_count ?? 0,
+    no_count: p.no_count ?? 0,
+    total_eligible_tokens: p.total_eligible_tokens != null ? Number(p.total_eligible_tokens) : null,
+  }));
+
+  return { items, total: count ?? 0 };
+}
+
+/**
+ * Owner initiates a poll when venture is live or already voting.
+ */
+async function createForOwner(ownerId, body) {
+  const venture_id = body.venture_id;
+  const question = String(body.question || '').trim();
+  const type = String(body.type || 'general').slice(0, 50);
+  const description = body.description != null ? String(body.description) : null;
+  const rule = body.rule != null ? String(body.rule).slice(0, 100) : null;
+  const duration_days = Math.min(Math.max(Number(body.duration_days) || 5, 1), 30);
+
+  if (!venture_id) {
+    const err = new Error('venture_id is required');
+    err.status = 400;
+    throw err;
+  }
+  if (!question) {
+    const err = new Error('question is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const { data: venture, error: ve } = await adminSupabase
+    .from('ventures')
+    .select('id, owner_id, status')
+    .eq('id', venture_id)
+    .maybeSingle();
+  if (ve) throw ve;
+  if (!venture || venture.owner_id !== ownerId) {
+    const err = new Error('Venture not found or you are not the owner');
+    err.status = 404;
+    throw err;
+  }
+  if (!['live', 'voting'].includes(venture.status)) {
+    const err = new Error('Polls can only be started for live or voting lands');
+    err.status = 400;
+    throw err;
+  }
+
+  const starts_at = body.starts_at ? new Date(body.starts_at) : new Date();
+  const ends_at = addDays(starts_at, duration_days);
+
+  const { data: poll, error: pe } = await adminSupabase
+    .from('polls')
+    .insert({
+      venture_id,
+      type,
+      question,
+      description,
+      rule,
+      starts_at: starts_at.toISOString(),
+      ends_at: ends_at.toISOString(),
+      status: 'active',
+      yes_count: 0,
+      no_count: 0,
+    })
+    .select('id, venture_id, type, question, description, rule, starts_at, ends_at, status')
+    .single();
+  if (pe) throw pe;
+
+  if (venture.status === 'live') {
+    await adminSupabase.from('ventures').update({ status: 'voting' }).eq('id', venture_id);
+  }
+
+  return poll;
+}
+
 async function castVote(userId, pollId, voteRaw) {
   const vote = String(voteRaw || '').toLowerCase();
   if (!['yes', 'no'].includes(vote)) {
@@ -232,4 +350,4 @@ async function castVote(userId, pollId, voteRaw) {
   return { success: true, token_weight: tokenWeight, vote };
 }
 
-module.exports = { listForUser, getByIdForUser, castVote, getTokenWeightByVenture };
+module.exports = { listForUser, getByIdForUser, castVote, getTokenWeightByVenture, listForOwner, createForOwner };

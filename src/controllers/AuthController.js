@@ -5,6 +5,7 @@ const SmsService = require('../services/SmsService');
 const JwtService = require('../services/JwtService');
 const UserService = require('../services/UserService');
 const WalletLinkService = require('../services/WalletLinkService');
+const ReferralService = require('../services/ReferralService');
 const { checkRateLimit } = require('../middleware/rateLimit');
 
 async function sendOtp(req, res) {
@@ -85,6 +86,7 @@ async function verifyOtp(req, res) {
       kyc_id: kycId,
       referred_by_agent_id: referredByAgentId,
       referred_by_link_id: referredByLinkId,
+      referral_code,
       developer,
       company_name: companyName,
       gstin,
@@ -135,12 +137,19 @@ async function verifyOtp(req, res) {
 
     let user = await UserService.findByPhone(phoneClean);
 
+    let resolvedLinkId = referredByLinkId || null;
+    if (!resolvedLinkId && referral_code) {
+      const link = await ReferralService.findByCode(String(referral_code).trim());
+      if (link && link.is_active) resolvedLinkId = link.id;
+    }
+
     if (register || developer) {
       const KycService = require('../services/KycService');
       const kycIdEncrypted = kycId ? KycService.encrypt(kycId) : null;
       const userRole = developer ? 'developer' : (role || 'customer');
 
       if (user) {
+        const prevLink = user.referred_by_link_id;
         user = await UserService.updateUser(user.id, {
           name: name || user.name,
           email: email || user.email,
@@ -148,8 +157,9 @@ async function verifyOtp(req, res) {
           kyc_type: kycType || user.kyc_type,
           kyc_id_encrypted: kycIdEncrypted || user.kyc_id_encrypted,
           referred_by_agent_id: referredByAgentId || user.referred_by_agent_id,
-          referred_by_link_id: referredByLinkId || user.referred_by_link_id,
+          referred_by_link_id: resolvedLinkId || user.referred_by_link_id,
         });
+        if (resolvedLinkId && !prevLink) await ReferralService.incrementSignups(resolvedLinkId);
       } else {
         user = await UserService.createUser({
           phone: phoneClean,
@@ -160,8 +170,9 @@ async function verifyOtp(req, res) {
           kycType: kycType || null,
           kycIdEncrypted,
           referredByAgentId: referredByAgentId || null,
-          referredByLinkId: referredByLinkId || null,
+          referredByLinkId: resolvedLinkId || null,
         });
+        if (resolvedLinkId) await ReferralService.incrementSignups(resolvedLinkId);
       }
 
       if (developer && (companyName || gstin || licenseNumber)) {

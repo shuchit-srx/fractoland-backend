@@ -4,8 +4,13 @@ const InvestmentService = require('../services/InvestmentService');
 
 async function create(req, res) {
   try {
-    const { venture_id, token_count, payment_method } = req.body || {};
-    const investment = await InvestmentService.create(req.userId, { venture_id, token_count, payment_method });
+    const { venture_id, token_count, payment_method, referral_code } = req.body || {};
+    const investment = await InvestmentService.create(req.userId, {
+      venture_id,
+      token_count,
+      payment_method,
+      referral_code,
+    });
     res.status(201).json(investment);
   } catch (e) {
     console.error('investments create error', e);

@@ -10,6 +10,8 @@ const investmentsRoutes = require('./routes/investmentsRoutes');
 const pollsRoutes = require('./routes/pollsRoutes');
 const paymentsRoutes = require('./routes/paymentsRoutes');
 const wishlistRoutes = require('./routes/wishlistRoutes');
+const referralsRoutes = require('./routes/referralsRoutes');
+const ownersRoutes = require('./routes/ownersRoutes');
 
 const app = express();
 
@@ -28,5 +30,7 @@ app.use('/investments', investmentsRoutes);
 app.use('/polls', pollsRoutes);
 app.use('/payments', paymentsRoutes);
 app.use('/wishlist', wishlistRoutes);
+app.use('/referrals', referralsRoutes);
+app.use('/owners', ownersRoutes);
 
 module.exports = app;
