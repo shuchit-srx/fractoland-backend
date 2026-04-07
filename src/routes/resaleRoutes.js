@@ -2,10 +2,13 @@
 
 const express = require('express');
 const ResaleController = require('../controllers/ResaleController');
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, optionalAuthMiddleware } = require('../middleware/auth');
 const { requireRole } = require('../middleware/requireRole');
 
 const router = express.Router();
+
+router.get('/marketplace', optionalAuthMiddleware, ResaleController.marketplace);
+router.post('/:id/purchase', authMiddleware, ResaleController.purchase);
 
 router.post('/', authMiddleware, ResaleController.create);
 router.get('/me', authMiddleware, ResaleController.listMe);

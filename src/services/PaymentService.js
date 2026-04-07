@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { adminSupabase } = require('../config/database');
 const WalletService = require('./WalletService');
 const ReferralService = require('./ReferralService');
+const ResaleService = require('./ResaleService');
 
 function toNum(v) {
   return Number(v ?? 0);
@@ -33,15 +34,20 @@ async function listByUser(userId, { type, limit = 20, offset = 0 } = {}) {
   const { data, error, count } = await q;
   if (error) throw error;
   return {
-    items: (data || []).map((p) => ({
-      id: p.id,
-      type: p.type,
-      amount: toNum(p.amount),
-      currency: p.currency || 'INR',
-      status: p.status,
-      description: `${p.type} via ${p.gateway || 'system'}`,
-      created_at: p.created_at,
-    })),
+    items: (data || []).map((p) => {
+      let description = `${p.type} via ${p.gateway || 'system'}`;
+      if (p.type === 'resale_purchase') description = 'Secondary market token purchase';
+      if (p.type === 'resale_payout') description = 'Resale proceeds (net of platform fee)';
+      return {
+        id: p.id,
+        type: p.type,
+        amount: toNum(p.amount),
+        currency: p.currency || 'INR',
+        status: p.status,
+        description,
+        created_at: p.created_at,
+      };
+    }),
     total: count ?? 0,
   };
 }
@@ -120,6 +126,10 @@ async function processInvestmentCompletionForPayment(payment, status) {
   }
 }
 
+async function processResalePurchaseForPayment(payment, status) {
+  await ResaleService.processResalePurchaseCompletion(payment, status);
+}
+
 async function addFundsCallback(payload, signature) {
   const gateway_order_id = payload.gateway_order_id;
   const gateway_payment_id = payload.gateway_payment_id || null;
@@ -137,7 +147,7 @@ async function addFundsCallback(payload, signature) {
 
   const { data: payment, error: pErr } = await adminSupabase
     .from('payments')
-    .select('id, user_id, type, amount, status, gateway_order_id')
+    .select('id, user_id, type, amount, status, gateway_order_id, metadata')
     .eq('gateway_order_id', gateway_order_id)
     .maybeSingle();
   if (pErr) throw pErr;
@@ -151,20 +161,30 @@ async function addFundsCallback(payload, signature) {
     return { success: true, already_processed: true, payment_id: payment.id, status };
   }
 
+  const prevMeta = payment.metadata && typeof payment.metadata === 'object' ? { ...payment.metadata } : {};
+  const mergedMeta = {
+    ...prevMeta,
+    callback_status: status,
+    callback_received_at: new Date().toISOString(),
+  };
+
   await adminSupabase
     .from('payments')
     .update({
       status,
       gateway_payment_id,
-      metadata: { callback_status: status, callback_received_at: new Date().toISOString() },
+      metadata: mergedMeta,
     })
     .eq('id', payment.id);
+
+  const paymentForProcessors = { ...payment, metadata: mergedMeta };
 
   if (payment.type === 'add_funds' && status === 'completed') {
     await WalletService.credit(payment.user_id, payment.amount);
   }
 
-  await processInvestmentCompletionForPayment(payment, status);
+  await processInvestmentCompletionForPayment(paymentForProcessors, status);
+  await processResalePurchaseForPayment(paymentForProcessors, status);
   return { success: true, payment_id: payment.id, status };
 }
 

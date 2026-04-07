@@ -80,4 +80,27 @@ async function adminPatch(req, res) {
   }
 }
 
-module.exports = { create, listMe, cancel, adminList, adminPatch, availability };
+async function marketplace(req, res) {
+  try {
+    const { limit, offset } = parseLimitOffset(req.query);
+    const { venture_id } = req.query;
+    const result = await ResaleService.listMarketplace({ venture_id, limit, offset });
+    res.json(result);
+  } catch (e) {
+    console.error('resale marketplace error', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+}
+
+async function purchase(req, res) {
+  try {
+    const { payment_method, amount } = req.body || {};
+    const result = await ResaleService.purchase(req.userId, req.params.id, { payment_method, amount });
+    res.status(result.status === 'completed' ? 200 : 201).json(result);
+  } catch (e) {
+    const status = e.status || 500;
+    res.status(status).json({ error: status === 500 ? 'Server error' : 'Request error', message: e.message });
+  }
+}
+
+module.exports = { create, listMe, cancel, adminList, adminPatch, availability, marketplace, purchase };

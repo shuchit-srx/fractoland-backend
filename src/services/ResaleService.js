@@ -1,6 +1,8 @@
 'use strict';
 
+const { v4: uuidv4 } = require('uuid');
 const { adminSupabase } = require('../config/database');
+const WalletService = require('./WalletService');
 
 const ACTIVE_STATUSES = ['pending', 'listed', 'matched'];
 
@@ -275,6 +277,355 @@ async function adminUpdate(requestId, { status: newStatus, queue_position } = {}
   };
 }
 
+function feeRate() {
+  return Number(process.env.RESALE_PLATFORM_FEE_RATE || 0.02);
+}
+
+function resolveSaleAmount(resale, bodyAmount) {
+  const asked = resale.requested_amount != null ? toNum(resale.requested_amount) : null;
+  if (asked != null && asked > 0) return asked;
+  const a = toNum(bodyAmount);
+  if (!Number.isFinite(a) || a < 1000) {
+    const err = new Error('Offer amount must be at least 1000 INR when listing has no fixed price');
+    err.status = 400;
+    throw err;
+  }
+  return a;
+}
+
+async function reduceSellerInvestments(sellerId, ventureId, tokensToRemove) {
+  let need = Number(tokensToRemove);
+  if (need <= 0) return;
+
+  const { data: rows, error } = await adminSupabase
+    .from('investments')
+    .select('id, token_count, amount_paid')
+    .eq('user_id', sellerId)
+    .eq('venture_id', ventureId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  for (const row of rows || []) {
+    if (need <= 0) break;
+    const tc = Number(row.token_count ?? 0);
+    const ap = toNum(row.amount_paid);
+    if (tc <= 0) continue;
+
+    if (tc <= need) {
+      const { error: delE } = await adminSupabase.from('investments').delete().eq('id', row.id);
+      if (delE) throw delE;
+      need -= tc;
+    } else {
+      const newTc = tc - need;
+      const newAp = Math.round((ap * newTc) / tc * 100) / 100;
+      const { error: upE } = await adminSupabase
+        .from('investments')
+        .update({ token_count: newTc, amount_paid: newAp })
+        .eq('id', row.id);
+      if (upE) throw upE;
+      need = 0;
+    }
+  }
+
+  if (need > 0) {
+    const err = new Error('Could not reconcile seller token lots');
+    err.status = 500;
+    throw err;
+  }
+}
+
+async function settleResaleTransfer({
+  resaleId,
+  buyerId,
+  sellerId,
+  ventureId,
+  tokenCount,
+  saleAmount,
+  purchasePaymentId,
+}) {
+  const rate = feeRate();
+  const feeAmt = Math.round(saleAmount * rate * 100) / 100;
+  const sellerNet = Math.round((saleAmount - feeAmt) * 100) / 100;
+
+  await reduceSellerInvestments(sellerId, ventureId, tokenCount);
+
+  const { error: invE } = await adminSupabase.from('investments').insert({
+    user_id: buyerId,
+    venture_id: ventureId,
+    token_count: tokenCount,
+    amount_paid: saleAmount,
+    payment_id: purchasePaymentId,
+    status: 'completed',
+  });
+  if (invE) throw invE;
+
+  const { data: payoutPay, error: poE } = await adminSupabase
+    .from('payments')
+    .insert({
+      user_id: sellerId,
+      type: 'resale_payout',
+      amount: sellerNet,
+      currency: 'INR',
+      status: 'completed',
+      gateway: 'internal',
+      metadata: {
+        resale_request_id: resaleId,
+        purchase_payment_id: purchasePaymentId,
+        buyer_user_id: buyerId,
+        gross_sale: saleAmount,
+        platform_fee: feeAmt,
+        fee_rate: rate,
+      },
+    })
+    .select('id')
+    .single();
+  if (poE) throw poE;
+
+  const { data: upd, error: upE } = await adminSupabase
+    .from('resale_requests')
+    .update({
+      status: 'completed',
+      sale_amount: saleAmount,
+      seller_payout_amount: sellerNet,
+      purchase_payment_id: purchasePaymentId,
+      seller_payout_payment_id: payoutPay.id,
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', resaleId)
+    .eq('status', 'matched')
+    .select('id');
+  if (upE) throw poE;
+  if (!upd || upd.length === 0) {
+    const err = new Error('Resale state changed during settlement');
+    err.status = 409;
+    throw err;
+  }
+
+  await WalletService.credit(sellerId, sellerNet);
+}
+
+async function listMarketplace({ venture_id, limit = 20, offset = 0 } = {}) {
+  let q = adminSupabase
+    .from('resale_requests')
+    .select(
+      'id, venture_id, token_count, requested_amount, queue_position, created_at, ventures(id, name, state, district, venture_images(file_url, sort_order), venture_tokens(token_price, total_tokens, available_tokens))',
+      { count: 'exact' }
+    )
+    .eq('status', 'listed')
+    .order('queue_position', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true })
+    .range(offset, offset + limit - 1);
+  if (venture_id) q = q.eq('venture_id', venture_id);
+  const { data, error, count } = await q;
+  if (error) throw error;
+
+  const items = (data || []).map((row) => {
+    const v = row.ventures || {};
+    const imgs = v.venture_images || [];
+    const arr = Array.isArray(imgs) ? imgs : [];
+    const sorted = [...arr].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const image_url = sorted[0]?.file_url || null;
+    const rawTok = v.venture_tokens;
+    const tok = Array.isArray(rawTok) ? rawTok[0] : rawTok || {};
+    const location = [v.district, v.state].filter(Boolean).join(', ') || '';
+    return {
+      id: row.id,
+      venture_id: row.venture_id,
+      token_count: row.token_count,
+      requested_amount: row.requested_amount != null ? toNum(row.requested_amount) : null,
+      queue_position: row.queue_position,
+      created_at: row.created_at,
+      venture_name: v.name || null,
+      location,
+      image_url,
+      reference_token_price: tok.token_price != null ? toNum(tok.token_price) : null,
+    };
+  });
+  return { items, total: count ?? 0 };
+}
+
+async function purchase(buyerId, resaleId, { payment_method, amount: bodyAmount }) {
+  const method = String(payment_method || '').toLowerCase();
+  if (!['wallet', 'gateway'].includes(method)) {
+    const err = new Error('payment_method must be wallet or gateway');
+    err.status = 400;
+    throw err;
+  }
+
+  const { data: resale, error: fErr } = await adminSupabase
+    .from('resale_requests')
+    .select('id, user_id, venture_id, token_count, requested_amount, status')
+    .eq('id', resaleId)
+    .maybeSingle();
+  if (fErr) throw fErr;
+  if (!resale || resale.status !== 'listed') {
+    const err = new Error('Listing is not available for purchase');
+    err.status = 404;
+    throw err;
+  }
+  if (resale.user_id === buyerId) {
+    const err = new Error('You cannot buy your own listing');
+    err.status = 400;
+    throw err;
+  }
+
+  let saleAmount;
+  try {
+    saleAmount = resolveSaleAmount(resale, bodyAmount);
+  } catch (e) {
+    throw e;
+  }
+
+  const { data: reserved, error: rErr } = await adminSupabase
+    .from('resale_requests')
+    .update({ status: 'matched', buyer_id: buyerId })
+    .eq('id', resaleId)
+    .eq('status', 'listed')
+    .select('id')
+    .maybeSingle();
+  if (rErr) throw rErr;
+  if (!reserved) {
+    const err = new Error('Listing was just sold or removed');
+    err.status = 409;
+    throw err;
+  }
+
+  if (method === 'wallet') {
+    let debited = false;
+    try {
+      await WalletService.debit(buyerId, saleAmount);
+      debited = true;
+
+      const { data: pay, error: pe } = await adminSupabase
+        .from('payments')
+        .insert({
+          user_id: buyerId,
+          type: 'resale_purchase',
+          amount: saleAmount,
+          currency: 'INR',
+          status: 'completed',
+          gateway: 'wallet',
+          metadata: {
+            resale_request_id: resaleId,
+            seller_user_id: resale.user_id,
+            venture_id: resale.venture_id,
+            token_count: resale.token_count,
+          },
+        })
+        .select('id')
+        .single();
+      if (pe) throw pe;
+
+      await settleResaleTransfer({
+        resaleId,
+        buyerId,
+        sellerId: resale.user_id,
+        ventureId: resale.venture_id,
+        tokenCount: resale.token_count,
+        saleAmount,
+        purchasePaymentId: pay.id,
+      });
+
+      return {
+        status: 'completed',
+        payment_id: pay.id,
+        sale_amount: saleAmount,
+        resale_id: resaleId,
+      };
+    } catch (e) {
+      if (debited) {
+        await WalletService.credit(buyerId, saleAmount).catch(() => {});
+      }
+      await adminSupabase.from('resale_requests').update({ status: 'listed', buyer_id: null }).eq('id', resaleId);
+      throw e;
+    }
+  }
+
+  const gatewayOrderId = `resale_${Date.now()}_${uuidv4().slice(0, 8)}`;
+  const { data: pay, error: pe } = await adminSupabase
+    .from('payments')
+    .insert({
+      user_id: buyerId,
+      type: 'resale_purchase',
+      amount: saleAmount,
+      currency: 'INR',
+      status: 'pending',
+      gateway: 'gateway',
+      gateway_order_id: gatewayOrderId,
+      metadata: {
+        resale_request_id: resaleId,
+        seller_user_id: resale.user_id,
+        venture_id: resale.venture_id,
+        token_count: resale.token_count,
+      },
+    })
+    .select('id, gateway_order_id')
+    .single();
+  if (pe) {
+    await adminSupabase.from('resale_requests').update({ status: 'listed', buyer_id: null }).eq('id', resaleId);
+    throw pe;
+  }
+
+  return {
+    status: 'pending',
+    payment_id: pay.id,
+    sale_amount: saleAmount,
+    resale_id: resaleId,
+    payment_gateway_order_id: pay.gateway_order_id,
+  };
+}
+
+async function processResalePurchaseCompletion(payment, status) {
+  if (payment.type !== 'resale_purchase') return;
+
+  const meta = payment.metadata && typeof payment.metadata === 'object' ? payment.metadata : {};
+  const resaleId = meta.resale_request_id;
+  const sellerId = meta.seller_user_id;
+
+  if (status === 'failed' || status === 'refunded') {
+    if (resaleId) {
+      await adminSupabase
+        .from('resale_requests')
+        .update({ status: 'listed', buyer_id: null })
+        .eq('id', resaleId)
+        .eq('status', 'matched');
+    }
+    return;
+  }
+
+  if (status !== 'completed') return;
+  if (!resaleId || !sellerId) return;
+
+  const { data: resale } = await adminSupabase
+    .from('resale_requests')
+    .select('id, user_id, venture_id, token_count, status, buyer_id, purchase_payment_id')
+    .eq('id', resaleId)
+    .maybeSingle();
+  if (!resale) return;
+
+  if (resale.status === 'completed') {
+    return;
+  }
+  if (resale.user_id !== sellerId) {
+    return;
+  }
+  if (resale.status !== 'matched' || resale.buyer_id !== payment.user_id) {
+    return;
+  }
+
+  const saleAmount = toNum(payment.amount);
+  await settleResaleTransfer({
+    resaleId,
+    buyerId: payment.user_id,
+    sellerId,
+    ventureId: resale.venture_id,
+    tokenCount: resale.token_count,
+    saleAmount,
+    purchasePaymentId: payment.id,
+  });
+}
+
 module.exports = {
   create,
   listByUser,
@@ -284,4 +635,7 @@ module.exports = {
   availableTokensForResale,
   completedTokensByVenture,
   getAvailability,
+  listMarketplace,
+  purchase,
+  processResalePurchaseCompletion,
 };
