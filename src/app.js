@@ -9,6 +9,7 @@ const walletsRoutes = require('./routes/walletsRoutes');
 const investmentsRoutes = require('./routes/investmentsRoutes');
 const pollsRoutes = require('./routes/pollsRoutes');
 const paymentsRoutes = require('./routes/paymentsRoutes');
+const wishlistRoutes = require('./routes/wishlistRoutes');
 
 const app = express();
 
@@ -26,5 +27,6 @@ app.use('/wallets', walletsRoutes);
 app.use('/investments', investmentsRoutes);
 app.use('/polls', pollsRoutes);
 app.use('/payments', paymentsRoutes);
+app.use('/wishlist', wishlistRoutes);
 
 module.exports = app;
