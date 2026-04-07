@@ -12,6 +12,7 @@ const paymentsRoutes = require('./routes/paymentsRoutes');
 const wishlistRoutes = require('./routes/wishlistRoutes');
 const referralsRoutes = require('./routes/referralsRoutes');
 const ownersRoutes = require('./routes/ownersRoutes');
+const resaleRoutes = require('./routes/resaleRoutes');
 
 const app = express();
 
@@ -32,5 +33,6 @@ app.use('/payments', paymentsRoutes);
 app.use('/wishlist', wishlistRoutes);
 app.use('/referrals', referralsRoutes);
 app.use('/owners', ownersRoutes);
+app.use('/resale-requests', resaleRoutes);
 
 module.exports = app;
