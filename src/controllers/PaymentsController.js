@@ -1,6 +1,8 @@
 'use strict';
 
 const PaymentService = require('../services/PaymentService');
+const AuditService = require('../services/AuditService');
+const { clientIp } = require('../utils/requestIp');
 
 async function listMe(req, res) {
   try {
@@ -45,6 +47,14 @@ async function withdraw(req, res) {
   try {
     const { amount } = req.body || {};
     const result = await PaymentService.withdraw(req.userId, { amount });
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'payment.withdraw.completed',
+      resourceType: 'payment',
+      resourceId: result.id,
+      payload: { amount: result.amount, status: result.status },
+      ip: clientIp(req),
+    });
     res.status(201).json(result);
   } catch (e) {
     console.error('payments withdraw error', e);

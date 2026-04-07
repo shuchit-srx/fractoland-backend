@@ -5,6 +5,7 @@ const { adminSupabase } = require('../config/database');
 const WalletService = require('./WalletService');
 const ReferralService = require('./ReferralService');
 const ResaleService = require('./ResaleService');
+const AuditService = require('./AuditService');
 
 function toNum(v) {
   return Number(v ?? 0);
@@ -185,6 +186,21 @@ async function addFundsCallback(payload, signature) {
 
   await processInvestmentCompletionForPayment(paymentForProcessors, status);
   await processResalePurchaseForPayment(paymentForProcessors, status);
+
+  await AuditService.safeLog({
+    userId: payment.user_id,
+    action: `payment.callback.${status}`,
+    resourceType: 'payment',
+    resourceId: payment.id,
+    payload: {
+      type: payment.type,
+      gateway_order_id,
+      gateway_payment_id,
+      prior_status: payment.status,
+    },
+    ip: null,
+  });
+
   return { success: true, payment_id: payment.id, status };
 }
 
@@ -234,5 +250,48 @@ async function withdraw(userId, { amount }) {
   return { id: payment.id, status: 'completed', amount: amt };
 }
 
-module.exports = { listByUser, addFundsInit, addFundsCallback, withdraw };
+async function listAllAdmin({ type, status, user_id, limit = 50, offset = 0 } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const off = Math.max(Number(offset) || 0, 0);
+  let q = adminSupabase
+    .from('payments')
+    .select('id, user_id, type, amount, currency, status, gateway, gateway_order_id, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(off, off + lim - 1);
+  if (type) q = q.eq('type', type);
+  if (status) q = q.eq('status', status);
+  if (user_id) q = q.eq('user_id', user_id);
+  const { data, error, count } = await q;
+  if (error) throw error;
+  const rows = data || [];
+  const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))];
+  let userById = {};
+  if (userIds.length > 0) {
+    const { data: users } = await adminSupabase.from('users').select('id, name, phone').in('id', userIds);
+    for (const u of users || []) userById[u.id] = u;
+  }
+  const items = rows.map((p) => {
+    const u = userById[p.user_id] || {};
+    let description = `${p.type} via ${p.gateway || 'system'}`;
+    if (p.type === 'resale_purchase') description = 'Secondary market token purchase';
+    if (p.type === 'resale_payout') description = 'Resale proceeds (net of platform fee)';
+    return {
+      id: p.id,
+      user_id: p.user_id,
+      user_name: u.name || null,
+      user_phone: u.phone || null,
+      type: p.type,
+      amount: toNum(p.amount),
+      currency: p.currency || 'INR',
+      status: p.status,
+      gateway: p.gateway,
+      gateway_order_id: p.gateway_order_id,
+      description,
+      created_at: p.created_at,
+    };
+  });
+  return { items, total: count ?? 0 };
+}
+
+module.exports = { listByUser, addFundsInit, addFundsCallback, withdraw, listAllAdmin };
 

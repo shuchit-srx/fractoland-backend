@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const VentureService = require('../services/VentureService');
 const StorageService = require('../services/StorageService');
 const { adminSupabase } = require('../config/database');
+const AuditService = require('../services/AuditService');
+const { clientIp } = require('../utils/requestIp');
 
 async function list(req, res) {
   try {
@@ -65,6 +67,14 @@ async function create(req, res) {
     }
     const ownerId = req.userRole === 'admin' && payload.owner_id ? payload.owner_id : req.userId;
     const venture = await VentureService.create(payload, ownerId);
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'venture.create',
+      resourceType: 'venture',
+      resourceId: venture.id,
+      payload: { name: venture.name, owner_id: ownerId, status: venture.status },
+      ip: clientIp(req),
+    });
     res.status(201).json(venture);
   } catch (e) {
     console.error('ventures create error', e);
@@ -79,7 +89,16 @@ async function update(req, res) {
     if (!VentureService.canEdit(venture, req.userId, req.userRole)) {
       return res.status(403).json({ error: 'Forbidden', message: 'Cannot edit this venture' });
     }
+    const prev = { status: venture.status, name: venture.name };
     const updated = await VentureService.update(req.params.id, req.body || {});
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'venture.update',
+      resourceType: 'venture',
+      resourceId: req.params.id,
+      payload: { before: prev, body: req.body || {} },
+      ip: clientIp(req),
+    });
     res.json(updated);
   } catch (e) {
     console.error('ventures update error', e);

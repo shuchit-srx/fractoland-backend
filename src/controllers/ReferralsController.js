@@ -1,6 +1,8 @@
 'use strict';
 
 const ReferralService = require('../services/ReferralService');
+const AuditService = require('../services/AuditService');
+const { clientIp } = require('../utils/requestIp');
 
 function parseLimitOffset(query) {
   const limitRaw = query.limit != null ? Number(query.limit) : 20;
@@ -88,6 +90,14 @@ async function withdraw(req, res) {
   try {
     const { amount } = req.body || {};
     const row = await ReferralService.requestWithdrawal(req.userId, amount);
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'referral.withdraw.request',
+      resourceType: 'agent_earning',
+      resourceId: row.id,
+      payload: { amount: Number(amount), status: row.status },
+      ip: clientIp(req),
+    });
     res.status(201).json(row);
   } catch (e) {
     const status = e.status || 500;

@@ -1,6 +1,8 @@
 'use strict';
 
 const ResaleService = require('../services/ResaleService');
+const AuditService = require('../services/AuditService');
+const { clientIp } = require('../utils/requestIp');
 
 function parseLimitOffset(query) {
   const limitRaw = query.limit != null ? Number(query.limit) : 20;
@@ -70,6 +72,14 @@ async function adminPatch(req, res) {
   try {
     const { status, queue_position } = req.body || {};
     const row = await ResaleService.adminUpdate(req.params.id, { status, queue_position });
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'resale_request.admin_update',
+      resourceType: 'resale_request',
+      resourceId: req.params.id,
+      payload: { status, queue_position },
+      ip: clientIp(req),
+    });
     res.json(row);
   } catch (e) {
     const statusCode = e.status || 500;

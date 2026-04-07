@@ -350,4 +350,34 @@ async function castVote(userId, pollId, voteRaw) {
   return { success: true, token_weight: tokenWeight, vote };
 }
 
-module.exports = { listForUser, getByIdForUser, castVote, getTokenWeightByVenture, listForOwner, createForOwner };
+/** Admin: all polls with venture name (no eligibility filter). */
+async function listAllAdmin({ status, limit = 50, offset = 0 } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const off = Math.max(Number(offset) || 0, 0);
+  let q = adminSupabase
+    .from('polls')
+    .select(
+      'id, venture_id, type, question, description, rule, starts_at, ends_at, status, result, yes_count, no_count, total_eligible_tokens, created_at, ventures(name, state, district)',
+      { count: 'exact' }
+    )
+    .order('created_at', { ascending: false })
+    .range(off, off + lim - 1);
+  if (status && status !== 'all') q = q.eq('status', status);
+  const { data, error, count } = await q;
+  if (error) throw error;
+  const items = (data || []).map((p) => {
+    const v = p.ventures || {};
+    const { ventures, ...rest } = p;
+    return {
+      ...rest,
+      venture_name: v.name || null,
+      location: [v.district, v.state].filter(Boolean).join(', ') || null,
+      yes_count: Number(rest.yes_count ?? 0),
+      no_count: Number(rest.no_count ?? 0),
+      total_eligible_tokens: rest.total_eligible_tokens != null ? Number(rest.total_eligible_tokens) : null,
+    };
+  });
+  return { items, total: count ?? 0 };
+}
+
+module.exports = { listForUser, getByIdForUser, castVote, getTokenWeightByVenture, listForOwner, createForOwner, listAllAdmin };

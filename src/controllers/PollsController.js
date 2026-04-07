@@ -1,6 +1,8 @@
 'use strict';
 
 const PollService = require('../services/PollService');
+const AuditService = require('../services/AuditService');
+const { clientIp } = require('../utils/requestIp');
 
 function parseLimitOffset(query) {
   const limitRaw = query.limit != null ? Number(query.limit) : 20;
@@ -45,6 +47,14 @@ async function vote(req, res) {
     const { id } = req.params;
     const { vote: voteVal } = req.body || {};
     const result = await PollService.castVote(req.userId, id, voteVal);
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'poll.vote',
+      resourceType: 'poll',
+      resourceId: id,
+      payload: { vote: result.vote, token_weight: result.token_weight },
+      ip: clientIp(req),
+    });
     res.status(201).json(result);
   } catch (e) {
     console.error('polls vote error', e);

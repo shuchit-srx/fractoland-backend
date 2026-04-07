@@ -1,6 +1,8 @@
 'use strict';
 
 const InvestmentService = require('../services/InvestmentService');
+const AuditService = require('../services/AuditService');
+const { clientIp } = require('../utils/requestIp');
 
 async function create(req, res) {
   try {
@@ -10,6 +12,20 @@ async function create(req, res) {
       token_count,
       payment_method,
       referral_code,
+    });
+    await AuditService.safeLog({
+      userId: req.userId,
+      action: 'investment.create',
+      resourceType: 'investment',
+      resourceId: investment.id,
+      payload: {
+        venture_id: investment.venture_id,
+        token_count: investment.token_count,
+        amount_paid: investment.amount_paid,
+        status: investment.status,
+        payment_method,
+      },
+      ip: clientIp(req),
     });
     res.status(201).json(investment);
   } catch (e) {
