@@ -152,15 +152,7 @@ async function addFundsCallback(payload, signature) {
     .eq('id', payment.id);
 
   if (payment.type === 'add_funds' && status === 'completed') {
-    const wallet = await WalletService.getOrCreate(payment.user_id);
-    const current = toNum(wallet.balance);
-    const newBal = current + toNum(payment.amount);
-    const updated = await WalletService.updateBalanceById(wallet.id, wallet.balance, newBal);
-    if (!updated) {
-      const err = new Error('Wallet balance changed, retry callback');
-      err.status = 409;
-      throw err;
-    }
+    await WalletService.credit(payment.user_id, payment.amount);
   }
 
   await processInvestmentCompletionForPayment(payment, status);
@@ -171,13 +163,6 @@ async function withdraw(userId, { amount }) {
   const amt = toNum(amount);
   if (!Number.isFinite(amt) || amt < 1000) {
     const err = new Error('Minimum withdrawal amount is 1000');
-    err.status = 400;
-    throw err;
-  }
-  const wallet = await WalletService.getOrCreate(userId);
-  const balance = toNum(wallet.balance);
-  if (balance < amt) {
-    const err = new Error('Insufficient wallet balance');
     err.status = 400;
     throw err;
   }
@@ -196,17 +181,25 @@ async function withdraw(userId, { amount }) {
     .single();
   if (pErr) throw pErr;
 
-  const updated = await WalletService.updateBalanceById(wallet.id, wallet.balance, balance - amt);
-  if (!updated) {
+  let debited;
+  try {
+    debited = await WalletService.debit(userId, amt);
+  } catch (e) {
     await adminSupabase.from('payments').update({ status: 'failed' }).eq('id', payment.id);
-    const err = new Error('Wallet balance changed, please retry');
-    err.status = 409;
-    throw err;
+    throw e;
   }
 
   await adminSupabase
     .from('payments')
-    .update({ status: 'completed', metadata: { flow: 'withdraw', processed_at: new Date().toISOString() } })
+    .update({
+      status: 'completed',
+      metadata: {
+        flow: 'withdraw',
+        processed_at: new Date().toISOString(),
+        old_balance: debited.old_balance,
+        new_balance: debited.new_balance,
+      },
+    })
     .eq('id', payment.id);
 
   return { id: payment.id, status: 'completed', amount: amt };

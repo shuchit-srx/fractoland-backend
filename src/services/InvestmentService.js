@@ -2,6 +2,7 @@
 
 const { adminSupabase } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+const WalletService = require('./WalletService');
 
 async function create(userId, { venture_id, token_count, payment_method }) {
   const tokenCount = Number(token_count);
@@ -101,42 +102,13 @@ async function create(userId, { venture_id, token_count, payment_method }) {
     };
   }
 
-  // Wallet flow: verify and debit wallet first.
-  const { data: wallet, error: walletErr } = await adminSupabase
-    .from('wallets')
-    .select('id, balance')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (walletErr) throw walletErr;
-  if (!wallet) {
-    const err = new Error('Wallet not found');
-    err.status = 400;
-    throw err;
-  }
-
-  const balance = Number(wallet.balance ?? 0);
-  if (balance < amountPaid) {
-    // Mark pending investment as failed-equivalent in payment trail by setting payment failed.
+  // Wallet flow: verify and debit via central wallet service.
+  let debited;
+  try {
+    debited = await WalletService.debit(userId, amountPaid);
+  } catch (e) {
     await adminSupabase.from('payments').update({ status: 'failed' }).eq('id', payment.id);
-    const err = new Error('Insufficient wallet balance');
-    err.status = 400;
-    throw err;
-  }
-
-  const newBalance = balance - amountPaid;
-  const { data: walletUpdated, error: walletUpdErr } = await adminSupabase
-    .from('wallets')
-    .update({ balance: newBalance })
-    .eq('id', wallet.id)
-    .eq('balance', wallet.balance)
-    .select('id')
-    .maybeSingle();
-  if (walletUpdErr) throw walletUpdErr;
-  if (!walletUpdated) {
-    await adminSupabase.from('payments').update({ status: 'failed' }).eq('id', payment.id);
-    const err = new Error('Wallet balance changed, please retry');
-    err.status = 409;
-    throw err;
+    throw e;
   }
 
   // Optimistic token decrement to reduce oversell risk.
@@ -151,7 +123,7 @@ async function create(userId, { venture_id, token_count, payment_method }) {
 
   if (tokenUpdErr || !tokenUpdated) {
     // Compensate wallet/payment on conflict.
-    await adminSupabase.from('wallets').update({ balance }).eq('id', wallet.id);
+    await WalletService.credit(userId, amountPaid);
     await adminSupabase.from('payments').update({ status: 'failed' }).eq('id', payment.id);
     const err = new Error('Token availability changed, please retry');
     err.status = 409;
@@ -172,7 +144,11 @@ async function create(userId, { venture_id, token_count, payment_method }) {
     .single();
   if (compInvErr) throw compInvErr;
 
-  return completedInv;
+  return {
+    ...completedInv,
+    wallet_balance_before: debited.old_balance,
+    wallet_balance_after: debited.new_balance,
+  };
 }
 
 async function listByUser(userId, { status, venture_id, limit = 20, offset = 0 } = {}) {
