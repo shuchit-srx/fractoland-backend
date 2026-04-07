@@ -8,6 +8,7 @@ const venturesRoutes = require('./routes/venturesRoutes');
 const walletsRoutes = require('./routes/walletsRoutes');
 const investmentsRoutes = require('./routes/investmentsRoutes');
 const pollsRoutes = require('./routes/pollsRoutes');
+const paymentsRoutes = require('./routes/paymentsRoutes');
 
 const app = express();
 
@@ -24,5 +25,6 @@ app.use('/ventures', venturesRoutes);
 app.use('/wallets', walletsRoutes);
 app.use('/investments', investmentsRoutes);
 app.use('/polls', pollsRoutes);
+app.use('/payments', paymentsRoutes);
 
 module.exports = app;

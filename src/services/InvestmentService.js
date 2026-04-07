@@ -1,6 +1,7 @@
 'use strict';
 
 const { adminSupabase } = require('../config/database');
+const { v4: uuidv4 } = require('uuid');
 
 async function create(userId, { venture_id, token_count, payment_method }) {
   const tokenCount = Number(token_count);
@@ -62,6 +63,7 @@ async function create(userId, { venture_id, token_count, payment_method }) {
 
   // Payment row is always created first for traceability.
   const paymentStatus = method === 'wallet' ? 'completed' : 'pending';
+  const gatewayOrderId = method === 'gateway' ? `order_${Date.now()}_${uuidv4().slice(0, 8)}` : null;
   const { data: payment, error: paymentErr } = await adminSupabase
     .from('payments')
     .insert({
@@ -71,9 +73,10 @@ async function create(userId, { venture_id, token_count, payment_method }) {
       currency: 'INR',
       status: paymentStatus,
       gateway: method === 'gateway' ? 'gateway' : 'wallet',
+      gateway_order_id: gatewayOrderId,
       metadata: { venture_id, token_count: tokenCount, payment_method: method },
     })
-    .select('id, status')
+    .select('id, status, gateway_order_id')
     .single();
   if (paymentErr) throw paymentErr;
 
@@ -92,7 +95,10 @@ async function create(userId, { venture_id, token_count, payment_method }) {
       .select('id, venture_id, token_count, amount_paid, status, payment_id, tx_hash')
       .single();
     if (invErr) throw invErr;
-    return pendingInv;
+    return {
+      ...pendingInv,
+      payment_gateway_order_id: payment.gateway_order_id || null,
+    };
   }
 
   // Wallet flow: verify and debit wallet first.
