@@ -37,3 +37,5 @@ build/
 *.tgz
 
 supabase/
+
+docs/
